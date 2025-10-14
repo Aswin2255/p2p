@@ -4,21 +4,24 @@ const wss = new WebSocketServer({ port: 8080 });
 
 const GLOBAL_ROOM_ID = 1
 
+interface ROOM {
+    roomId : number;
+    members : {
+        socket : WebSocket;
+        type : string;
+    }[]
+}
+
 interface USER {
     socket : WebSocket;
 }
 
-interface ROOM {
-    roomId : number;
-    users : {
-        socket : WebSocket;
-    }[]
-}
+
+let room : ROOM[] = [];
 
 let senderSocket : null | WebSocket = null;
 let receiverSocket : null | WebSocket = null;
 
-let room : ROOM[] = [];
 let userQue : USER[] = [];
 
 const addUserToQueue = (ws: WebSocket)=>{
@@ -44,21 +47,34 @@ const addUserToRoom = (ws: WebSocket)=>{
 
 
 
-let roomLogic = ()=>{
-    let newUser = userQue.shift();
+let roomLogic = (ws: WebSocket)=>{
+
     let findRoom = room.find((room) => room.roomId === GLOBAL_ROOM_ID);
-if(findRoom && findRoom.users.length < 2 ){
-    let newUser = userQue.shift();
-    const newRoom = {
-        roomId : GLOBAL_ROOM_ID,
-        users : [{socket : newUser?.socket}]
+
+    if(findRoom && findRoom.members && findRoom.members.length < 2){
+        console.log("room already there..")
+        let reciever = {socket:ws,type:"reciever"}
+        findRoom.members.push(reciever)
+        let sender = findRoom.members.find((mem)=> mem.type === 'sender')
+        if(sender){
+            senderSocket = sender?.socket
+            senderSocket.send(JSON.stringify({type : "create-offer",roomid : findRoom.roomId}))
+        }
+        console.log("receiver came")
+       
     }
+    else{
+        console.log("new room created")
+       let newRoom = {
+        roomId : GLOBAL_ROOM_ID,
+        members : [{socket : ws,type : "sender"}]
+       }
+       senderSocket = ws;
+       room.push(newRoom)
+       senderSocket.send(JSON.stringify({type : "waiting-for-other-user"}))
+    }
+   
 
-
-}
-else{
-
-}
 }
 
 console.log('Server is running on port 8080');
@@ -67,6 +83,68 @@ wss.on('connection', (ws) => {
     console.log('Client connected');
     ws.on('message', (data: any) => {
         const message = JSON.parse(data);
+        if(message.type === "lobby"){
+            console.log("user enter the loby..")
+            roomLogic(ws);
+        }
+        else if(message.type === "send-offer"){
+            console.log("sender sents offer...")
+            let roomid = message.roomid
+            let sdp = message.sdp
+            let findRoom = room.find((room)=>room.roomId === roomid)
+            if(findRoom){
+                let reciver = findRoom.members.find((mem)=>mem.type === "reciever")
+                if(reciver){
+
+                    receiverSocket = reciver?.socket
+                    receiverSocket.send(JSON.stringify({type:"create-answer",sdp:sdp,roomid:roomid}))
+
+                }
+               
+            }
+        }
+        else if (message.type === "send-answer"){
+            console.log("reciever sends answer")
+            let roomid = message.roomid
+            let sdp = message.sdp
+            let findRoom = room.find((room)=>room.roomId === roomid)
+            if(findRoom){
+                let sender = findRoom.members.find((mem)=>mem.type === "sender")
+                if(sender){
+                    senderSocket = sender.socket
+                    senderSocket.send(JSON.stringify({type:"send-answer",sdp:sdp,roomid:roomid}))
+                }
+            }
+        }
+        else if (message.type === "ice-candidate"){
+            const {role} = message
+            let findRoom = room.find((room)=>room.roomId === GLOBAL_ROOM_ID)
+            if (role === "reciever"){
+               
+                if(findRoom){
+                    let reciever = findRoom.members.find((mem)=>mem.type === "reciever")
+                    if(reciever){
+                        receiverSocket = reciever.socket
+                        receiverSocket?.send(JSON.stringify({type : "recieved-candidate", candidate : message.candidate,role}))
+                    }
+                    
+
+                }
+
+            }
+            else if (role === "sender"){
+
+                if(findRoom){
+                    let sender = findRoom.members.find((mem)=>mem.type === "sender")
+                    if(sender){
+                        senderSocket = sender.socket
+                        senderSocket?.send(JSON.stringify({type : "recieved-candidate", candidate : message.candidate,role}))
+                    }
+                }
+
+            }
+        }
+        /*
         if(message.type === "join-room"){
             addUserToQueue(ws);
             if(userQue.length && userQue.length < 2){
@@ -98,6 +176,7 @@ wss.on('connection', (ws) => {
                 senderSocket?.send(JSON.stringify({type : "ice-candidate", candidate : message.candidate}))
             }
         }
+            */
 
     })
 })
