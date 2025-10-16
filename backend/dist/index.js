@@ -28,9 +28,9 @@ let roomLogic = (ws) => {
     let findRoom = room.find((room) => room.roomId === GLOBAL_ROOM_ID);
     if (findRoom && findRoom.members && findRoom.members.length < 2) {
         console.log("room already there..");
-        let reciever = { socket: ws, type: "reciever" };
+        let reciever = { socket: ws, type: "receiver" };
         findRoom.members.push(reciever);
-        let sender = findRoom.members.find((mem) => mem.type === 'sender');
+        let sender = findRoom.members.find((mem) => mem.type === "sender");
         if (sender) {
             senderSocket = sender === null || sender === void 0 ? void 0 : sender.socket;
             senderSocket.send(JSON.stringify({ type: "create-offer", roomid: findRoom.roomId }));
@@ -38,35 +38,38 @@ let roomLogic = (ws) => {
         console.log("receiver came");
     }
     else {
-        console.log("new room created");
         let newRoom = {
             roomId: GLOBAL_ROOM_ID,
-            members: [{ socket: ws, type: "sender" }]
+            members: [{ socket: ws, type: "sender" }],
         };
         senderSocket = ws;
         room.push(newRoom);
-        senderSocket.send(JSON.stringify({ type: "waiting-for-other-user" }));
+        senderSocket.send(JSON.stringify({ type: "waiting-for-other-user", roomid: newRoom.roomId }));
+        console.log("new room created");
     }
 };
-console.log('Server is running on port 8080');
-wss.on('connection', (ws) => {
-    console.log('Client connected');
-    ws.on('message', (data) => {
+console.log("Server is running on port 8080");
+wss.on("connection", (ws) => {
+    console.log("Client connected");
+    ws.on("message", (data) => {
         const message = JSON.parse(data);
         if (message.type === "lobby") {
             console.log("user enter the loby..");
             roomLogic(ws);
         }
         else if (message.type === "send-offer") {
-            console.log("sender sents offer...");
             let roomid = message.roomid;
             let sdp = message.sdp;
             let findRoom = room.find((room) => room.roomId === roomid);
             if (findRoom) {
-                let reciver = findRoom.members.find((mem) => mem.type === "reciever");
+                let reciver = findRoom.members.find((mem) => mem.type === "receiver");
                 if (reciver) {
                     receiverSocket = reciver === null || reciver === void 0 ? void 0 : reciver.socket;
                     receiverSocket.send(JSON.stringify({ type: "create-answer", sdp: sdp, roomid: roomid }));
+                    console.log("sender sents offer...");
+                }
+                else {
+                    console.log("reciever not found");
                 }
             }
         }
@@ -79,64 +82,63 @@ wss.on('connection', (ws) => {
                 let sender = findRoom.members.find((mem) => mem.type === "sender");
                 if (sender) {
                     senderSocket = sender.socket;
-                    senderSocket.send(JSON.stringify({ type: "send-answer", sdp: sdp, roomid: roomid }));
+                    senderSocket.send(JSON.stringify({ type: "receiver-answer", sdp: sdp, roomid: roomid }));
                 }
             }
         }
-        else if (message.type === "ice-candidate") {
-            const { role } = message;
-            let findRoom = room.find((room) => room.roomId === GLOBAL_ROOM_ID);
-            if (role === "reciever") {
-                if (findRoom) {
-                    let reciever = findRoom.members.find((mem) => mem.type === "reciever");
-                    if (reciever) {
-                        receiverSocket = reciever.socket;
-                        receiverSocket === null || receiverSocket === void 0 ? void 0 : receiverSocket.send(JSON.stringify({ type: "recieved-candidate", candidate: message.candidate, role }));
-                    }
+        else if (message.type === "send-ice-candidate") {
+            console.log("ice candidate received" + message.role);
+            const roomid = message.roomid;
+            const role = message.role;
+            const usertoSend = role === "sender" ? "receiver" : "sender";
+            //console.log(roomid, role);
+            const findRoom = room.find((room) => room.roomId === roomid);
+            //console.log(findRoom);
+            if (findRoom) {
+                const memeber = findRoom.members.find((mem) => mem.type === usertoSend);
+                if (memeber) {
+                    memeber.socket.send(JSON.stringify({ type: "add-ice-candidate", candidate: message.candidate }));
+                }
+                else {
+                    console.log("member not found");
                 }
             }
-            else if (role === "sender") {
-                if (findRoom) {
-                    let sender = findRoom.members.find((mem) => mem.type === "sender");
-                    if (sender) {
-                        senderSocket = sender.socket;
-                        senderSocket === null || senderSocket === void 0 ? void 0 : senderSocket.send(JSON.stringify({ type: "recieved-candidate", candidate: message.candidate, role }));
-                    }
-                }
+            else {
+                console.log("room not found");
             }
         }
         /*
-        if(message.type === "join-room"){
-            addUserToQueue(ws);
-            if(userQue.length && userQue.length < 2){
-                addUserToRoom(ws);
+            if(message.type === "join-room"){
+                addUserToQueue(ws);
+                if(userQue.length && userQue.length < 2){
+                    addUserToRoom(ws);
+                }
             }
-        }
-        if (message.type === 'identify-as-sender') {
-            console.log("Sender connected");
-           senderSocket = ws
-        } else if (message.type === "identify-as-receiver"){
-            console.log("Receiver connected");
-            receiverSocket = ws
-        }
-        else if(message.type === "create-offer"){
-            console.log("Offer received");
-            receiverSocket?.send(JSON.stringify({type : "create-offer", sdp : message.sdp}))
-        }
-        else if(message.type === "create-answer"){
-            console.log("Answer received");
-            senderSocket?.send(JSON.stringify({type : "create-answer", sdp : message.sdp}))
-        }
-        else if (message.type === "ice-candidate"){
-            if (ws === senderSocket){
-                console.log("ICE candidate received from sender");
-                receiverSocket?.send(JSON.stringify({type : "ice-candidate", candidate : message.candidate}))
+            if (message.type === 'identify-as-sender') {
+                console.log("Sender connected");
+               senderSocket = ws
+            } else if (message.type === "identify-as-receiver"){
+                console.log("Receiver connected");
+                receiverSocket = ws
             }
-            else if (ws === receiverSocket){
-                console.log("ICE candidate received from receiver");
-                senderSocket?.send(JSON.stringify({type : "ice-candidate", candidate : message.candidate}))
+            else if(message.type === "create-offer"){
+                console.log("Offer received");
+                receiverSocket?.send(JSON.stringify({type : "create-offer", sdp : message.sdp}))
             }
-        }
-            */
+            else if(message.type === "create-answer"){
+                console.log("Answer received");
+                senderSocket?.send(JSON.stringify({type : "create-answer", sdp : message.sdp}))
+            }
+            else if (message.type === "ice-candidate"){
+                if (ws === senderSocket){
+                    console.log("ICE candidate received from sender");
+                    receiverSocket?.send(JSON.stringify({type : "ice-candidate", candidate : message.candidate}))
+                }
+                else if (ws === receiverSocket){
+                    console.log("ICE candidate received from receiver");
+                    senderSocket?.send(JSON.stringify({type : "ice-candidate", candidate : message.candidate}))
+                }
+            }
+                */
     });
 });
